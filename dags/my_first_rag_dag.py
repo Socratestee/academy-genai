@@ -28,7 +28,6 @@ _WEAVIATE_SCHEMA_PATH = os.getenv("WEAVIATE_SCHEMA_PATH")
 _CREATE_CLASS_TASK_ID = "create_class"
 _CLASS_ALREADY_EXISTS_TASK_ID = "class_already_exists"
 
-
 @dag(
     dag_display_name="📚 Ingest Knowledge Base",
     start_date=datetime(2024, 5, 1),
@@ -39,12 +38,12 @@ _CLASS_ALREADY_EXISTS_TASK_ID = "class_already_exists"
     default_args={
         "retries": 3,
         "retry_delay": duration(minutes=5),
-        "owner": "AI Task Force",
+        "owner": "Socratestee",
     },
     doc_md=__doc__,
     description="Ingest knowledge into the vector database for RAG.",
 )
-def my_first_rag_dag_solution():
+def my_first_rag_dag():
 
     @task.branch(retries=4)
     def check_class(
@@ -63,7 +62,7 @@ def my_first_rag_dag_solution():
         Returns:
             str: Task ID of the next task to execute.
         """
-
+        
         # connect to Weaviate using the Airflow connection `conn_id`
         hook = WeaviateHook(conn_id)
 
@@ -85,6 +84,7 @@ def my_first_rag_dag_solution():
         create_class_task_id=_CREATE_CLASS_TASK_ID,
         class_already_exists_task_id=_CLASS_ALREADY_EXISTS_TASK_ID,
     )
+
 
     @task
     def create_class(
@@ -117,31 +117,31 @@ def my_first_rag_dag_solution():
         class_name=_WEAVIATE_CLASS_NAME,
         vectorizer=_WEAVIATE_VECTORIZER,
         schema_json_path=_WEAVIATE_SCHEMA_PATH,
-    )
+    )   
 
     class_already_exists = EmptyOperator(task_id=_CLASS_ALREADY_EXISTS_TASK_ID)
-
+    
     weaviate_ready = EmptyOperator(task_id="weaviate_ready", trigger_rule="none_failed")
 
-    chain(check_class_obj, [create_class_obj, class_already_exists], weaviate_ready)
+    chain(check_class_obj, [create_class_obj, class_already_exists], weaviate_ready,)
+
+
 
     @task
-    def fetch_ingestion_folders_local_paths(ingestion_folders_local_path):
+    def fetch_ingestion_folders_local_paths(ingestion_folders_local_paths):
         # get all the folders in the given location
-        folders = os.listdir(ingestion_folders_local_path)
+        folders = os.listdir(ingestion_folders_local_paths)
 
         # return the full path of the folders
         return [
-            os.path.join(ingestion_folders_local_path, folder) for folder in folders
+            os.path.join(ingestion_folders_local_paths, folder) for folder in folders
         ]
 
     fetch_ingestion_folders_local_paths_obj = fetch_ingestion_folders_local_paths(
-        ingestion_folders_local_path=_INGESTION_FOLDERS_LOCAL_PATHS
+        ingestion_folders_local_paths=_INGESTION_FOLDERS_LOCAL_PATHS
     )
 
-    @task(
-        map_index_template="{{ my_custom_map_index }}",
-    )
+    @task(map_index_template="{{ my_custom_map_index }}")
     def extract_document_text(ingestion_folder_local_path):
         """
         Extract information from markdown files in a folder.
@@ -163,7 +163,7 @@ def my_first_rag_dag_solution():
 
             with open(file_path, "r", encoding="utf-8") as f:
                 texts.append(f.read())
-
+        
         document_df = pd.DataFrame(
             {
                 "folder_path": ingestion_folder_local_path,
@@ -213,14 +213,13 @@ def my_first_rag_dag_solution():
         df.drop(["chunks"], inplace=True, axis=1)
         df.reset_index(inplace=True, drop=True)
 
+
         # get the current context and define the custom map index variable
         from airflow.operators.python import get_current_context
 
         context = get_current_context()
 
-        context["my_custom_map_index"] = (
-            f"Chunked files from a df of length: {len(df)}."
-        )
+        context["my_custom_map_index"] = f"Chunked files from a df of length: {len(df)}."
 
         return df
 
@@ -228,7 +227,7 @@ def my_first_rag_dag_solution():
 
     ingest_data = WeaviateIngestOperator.partial(
         task_id="ingest_data",
-        conn_id=_WEAVIATE_CONN_ID,
+        conn_id="weaviate_default",
         class_name=_WEAVIATE_CLASS_NAME,
         map_index_template="Ingested files from: {{ task.input_data.to_dict()['folder_path'][0] }}.",
     ).expand(input_data=chunk_text_obj)
@@ -236,9 +235,7 @@ def my_first_rag_dag_solution():
     chain(
         [chunk_text_obj, weaviate_ready],
         ingest_data,
-)
+    )
 
 
-
-
-my_first_rag_dag_solution()
+my_first_rag_dag()
